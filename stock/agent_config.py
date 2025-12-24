@@ -36,11 +36,13 @@ from dataclasses import dataclass
 # We use a dataclass here, but Pydantic models are also supported.
 @dataclass
 class ResponseFormat:
-    """Response schema for the agent."""
-    # A punny response (always required)
+    """Agent响应格式定义"""
+    # AI的回复内容（必需）
     response: str
-    # Any interesting information about the weather if available
-    weather_conditions: str | None = None
+    # 交易决策建议（可选）：买入、卖出、持有
+    trading_decision: str | None = None
+    # 风险提示（可选）
+    risk_warning: str | None = None
 
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -48,11 +50,11 @@ checkpointer = InMemorySaver()
 
 from langchain.agents.structured_output import ToolStrategy
 from stock.stock_tools import stock_tools
+
 agent = create_agent(
     model=model,
-    system_prompt= SYSTEM_PROMPT,
+    system_prompt=SYSTEM_PROMPT,
     tools=stock_tools,
-    # context_schema=Context,
     response_format=ToolStrategy(ResponseFormat),
     checkpointer=checkpointer
 )

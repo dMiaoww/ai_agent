@@ -14,6 +14,47 @@ class Context:
 
 
 @tool
+def get_stock_code_by_name(stock_name: str):
+    """
+    根据股票名称查询股票代码
+    
+    参数:
+        stock_name: 股票名称，如"招商银行"、"贵州茅台"等
+    
+    返回:
+        包含股票代码、名称等信息的字典
+    """
+    try:
+        # 获取所有A股实时数据
+        realtime_df = ak.stock_zh_a_spot_em()
+        
+        # 模糊匹配股票名称
+        matched_stocks = realtime_df[realtime_df['名称'].str.contains(stock_name, na=False)]
+        
+        if len(matched_stocks) == 0:
+            return {"error": f"未找到股票名称包含'{stock_name}'的股票"}
+        
+        # 返回匹配结果
+        results = []
+        for _, row in matched_stocks.iterrows():
+            results.append({
+                "stock_code": row['代码'],
+                "stock_name": row['名称'],
+                "current_price": row['最新价'],
+                "change_pct": row['涨跌幅']
+            })
+        
+        return {
+            "query_name": stock_name,
+            "matched_count": len(results),
+            "stocks": results
+        }
+        
+    except Exception as e:
+        return {"error": f"查询股票代码失败: {str(e)}"}
+
+
+@tool
 def get_valid_stock_data(stock_codes):
     """获取有效的股票数据"""
     result = {
@@ -60,10 +101,16 @@ def get_valid_stock_data(stock_codes):
     return result
 
 @tool
-def analyze_stock_trend_detailed(stock_code, period="30d"):
+def analyze_stock_trend_detailed(stock_identifier: str, period="30d"):
     """
-    详细分析股票趋势
-    period: "7d", "30d", "90d", "180d", "1y"
+    详细分析股票趋势，支持股票代码或股票名称
+    
+    参数:
+        stock_identifier: 股票代码（如"000001"）或股票名称（如"平安银行"）
+        period: 分析周期，可选值: "7d", "30d", "90d", "180d", "1y"，默认"30d"
+    
+    返回:
+        包含趋势分析、技术指标、支撑阻力位等详细信息的字典
     """
     period_map = {
         "7d": 7,
@@ -76,6 +123,35 @@ def analyze_stock_trend_detailed(stock_code, period="30d"):
     days = period_map.get(period, 30)
     
     try:
+        # 判断输入是股票代码还是股票名称
+        stock_code = stock_identifier
+        stock_name = None
+        
+        # 如果输入包含中文，认为是股票名称
+        if any('\u4e00' <= char <= '\u9fff' for char in stock_identifier):
+            # 先查询股票代码
+            realtime_df = ak.stock_zh_a_spot_em()
+            matched = realtime_df[realtime_df['名称'].str.contains(stock_identifier, na=False)]
+            
+            if len(matched) == 0:
+                return {"error": f"未找到股票名称包含'{stock_identifier}'的股票"}
+            
+            if len(matched) > 1:
+                # 如果有多个匹配，尝试精确匹配
+                exact_match = matched[matched['名称'] == stock_identifier]
+                if len(exact_match) > 0:
+                    matched = exact_match
+                else:
+                    # 返回所有匹配的股票供用户选择
+                    matches_info = [f"{row['名称']}({row['代码']})" for _, row in matched.iterrows()]
+                    return {
+                        "error": f"找到多个匹配的股票，请指定具体的股票名称或使用股票代码",
+                        "matched_stocks": matches_info
+                    }
+            
+            stock_code = matched.iloc[0]['代码']
+            stock_name = matched.iloc[0]['名称']
+        
         # 获取更长时间的数据用于分析
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days * 3)  # 获取3倍数据用于计算
@@ -197,6 +273,7 @@ def analyze_stock_trend_detailed(stock_code, period="30d"):
         # 构建详细结果
         result = {
             "stock_code": stock_code,
+            "stock_name": stock_name if stock_name else stock_code,
             "period": period,
             "days_analyzed": days,
             "trend_analysis": {
@@ -239,7 +316,7 @@ def analyze_stock_trend_detailed(stock_code, period="30d"):
     except Exception as e:
         return {"error": f"详细分析失败: {str(e)}"}
     
-stock_tools = [get_valid_stock_data, analyze_stock_trend_detailed]
+stock_tools = [get_stock_code_by_name, get_valid_stock_data, analyze_stock_trend_detailed]
 
 # 使用示例
 if __name__ == "__main__":
