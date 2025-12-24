@@ -320,11 +320,39 @@ def analyze_stock_trend_detailed(stock_identifier: str, period="30d"):
 # ====== 虚拟交易与持仓管理 ======
 INITIAL_CASH = 300000.0
 
+PORTFOLIO_FILE = "portfolio_state.json"
+
 # 全局虚拟账户状态（单用户场景）
-portfolio_state = {
-    'cash': INITIAL_CASH,
-    'positions': {},  # {stock_code: {'shares': int, 'avg_cost': float}}
-}
+
+def _load_portfolio_state():
+    try:
+        with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("invalid portfolio data")
+        cash = float(data.get("cash", INITIAL_CASH))
+        positions = data.get("positions", {}) or {}
+        return {
+            'cash': cash,
+            'positions': positions,
+        }
+    except Exception:
+        return {
+            'cash': INITIAL_CASH,
+            'positions': {},
+        }
+
+
+def _save_portfolio_state():
+    try:
+        with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
+            json.dump(portfolio_state, f, ensure_ascii=False, indent=4)
+    except Exception:
+        # 持久化失败时不影响交易逻辑
+        pass
+
+
+portfolio_state = _load_portfolio_state()
 
 
 def _get_latest_price(stock_code: str):
@@ -343,16 +371,18 @@ def _get_latest_price(stock_code: str):
 
 
 @tool
-def buy_stock(stock_code: str, hands: int):
+def buy_stock(stock_code: str, hands: int, stop_loss_pct: float | None = None, take_profit_pct: float | None = None):
     '''
-    虚拟买入股票（不连接真实券商）
+    虚拟买入股票（不连接真实券商），并为本次交易设定止损/止盈条件（可选）
 
     参数:
         stock_code: 股票代码，例如'600519'
         hands: 买入手数，1手 = 100股
+        stop_loss_pct: 止损百分比，例如 5 表示跌破买入价的 5% 即触发止损
+        take_profit_pct: 止盈百分比，例如 15 表示涨幅达到 15% 即触发止盈
 
     返回:
-        包含成交价格、数量、剩余现金和当前持仓的字典
+        包含成交价格、数量、剩余现金和当前持仓及止损/止盈设置的字典
     '''
     global portfolio_state
 
@@ -378,7 +408,13 @@ def buy_stock(stock_code: str, hands: int):
 
     # 更新持仓
     position = portfolio_state['positions'].get(
-        stock_code, {'shares': 0, 'avg_cost': 0.0}
+        stock_code,
+        {
+            'shares': 0,
+            'avg_cost': 0.0,
+            'stop_loss_pct': None,
+            'take_profit_pct': None,
+        },
     )
     total_shares = position['shares'] + shares
     if total_shares > 0:
@@ -390,7 +426,22 @@ def buy_stock(stock_code: str, hands: int):
 
     position['shares'] = total_shares
     position['avg_cost'] = new_avg_cost
+    # 若本次传入止损/止盈参数，则更新持仓中的设置
+    if stop_loss_pct is not None:
+        position['stop_loss_pct'] = stop_loss_pct
+    if take_profit_pct is not None:
+        position['take_profit_pct'] = take_profit_pct
     portfolio_state['positions'][stock_code] = position
+    _save_portfolio_state()
+
+    sl_pct = position.get('stop_loss_pct')
+    tp_pct = position.get('take_profit_pct')
+    stop_loss_price = None
+    take_profit_price = None
+    if sl_pct is not None:
+        stop_loss_price = round(position['avg_cost'] * (1 - sl_pct / 100), 2)
+    if tp_pct is not None:
+        take_profit_price = round(position['avg_cost'] * (1 + tp_pct / 100), 2)
 
     return {
         'action': 'buy',
@@ -403,6 +454,10 @@ def buy_stock(stock_code: str, hands: int):
         'position': {
             'shares': position['shares'],
             'avg_cost': round(position['avg_cost'], 2),
+            'stop_loss_pct': sl_pct,
+            'take_profit_pct': tp_pct,
+            'stop_loss_price': stop_loss_price,
+            'take_profit_price': take_profit_price,
         },
     }
 
@@ -453,6 +508,7 @@ def sell_stock(stock_code: str, hands: int):
         portfolio_state['positions'].pop(stock_code, None)
     else:
         portfolio_state['positions'][stock_code] = position
+    _save_portfolio_state()
 
     return {
         'action': 'sell',

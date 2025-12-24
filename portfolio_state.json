@@ -1,0 +1,11 @@
+{
+    "cash": 161940.0,
+    "positions": {
+        "601318": {
+            "shares": 2000,
+            "avg_cost": 69.03,
+            "stop_loss_pct": 8.0,
+            "take_profit_pct": 20.0
+        }
+    }
+}
