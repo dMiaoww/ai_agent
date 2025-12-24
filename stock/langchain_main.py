@@ -1,6 +1,6 @@
 # pip install -qU langchain "langchain[anthropic]"
-from agent_config import agent
-from mytools import Context
+from stock.agent_config import agent
+from stock_tools import Context
 
 
 
