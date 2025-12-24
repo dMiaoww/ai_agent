@@ -314,9 +314,221 @@ def analyze_stock_trend_detailed(stock_identifier: str, period="30d"):
         return result
         
     except Exception as e:
-        return {"error": f"详细分析失败: {str(e)}"}
+        return {'error': f'详细分析失败: {str(e)}'}
     
-stock_tools = [get_stock_code_by_name, get_valid_stock_data, analyze_stock_trend_detailed]
+
+# ====== 虚拟交易与持仓管理 ======
+INITIAL_CASH = 300000.0
+
+# 全局虚拟账户状态（单用户场景）
+portfolio_state = {
+    'cash': INITIAL_CASH,
+    'positions': {},  # {stock_code: {'shares': int, 'avg_cost': float}}
+}
+
+
+def _get_latest_price(stock_code: str):
+    '''获取单只股票的最新价格，失败时返回None'''
+    try:
+        realtime_df = ak.stock_zh_a_spot_em()
+        row = realtime_df[realtime_df['代码'] == stock_code]
+        if len(row) == 0:
+            return None
+        price = row.iloc[0]['最新价']
+        if pd.isna(price) or price == 0:
+            return None
+        return float(price)
+    except Exception:
+        return None
+
+
+@tool
+def buy_stock(stock_code: str, hands: int):
+    '''
+    虚拟买入股票（不连接真实券商）
+
+    参数:
+        stock_code: 股票代码，例如'600519'
+        hands: 买入手数，1手 = 100股
+
+    返回:
+        包含成交价格、数量、剩余现金和当前持仓的字典
+    '''
+    global portfolio_state
+
+    if hands <= 0:
+        return {'error': '买入手数必须大于0'}
+
+    price = _get_latest_price(stock_code)
+    if price is None:
+        return {'error': f'无法获取股票 {stock_code} 的最新价格'}
+
+    shares = hands * 100
+    cost = price * shares
+
+    if cost > portfolio_state['cash']:
+        return {
+            'error': '可用现金不足，无法完成买入',
+            'cash': round(portfolio_state['cash'], 2),
+            'required': round(cost, 2),
+        }
+
+    # 更新现金
+    portfolio_state['cash'] -= cost
+
+    # 更新持仓
+    position = portfolio_state['positions'].get(
+        stock_code, {'shares': 0, 'avg_cost': 0.0}
+    )
+    total_shares = position['shares'] + shares
+    if total_shares > 0:
+        new_avg_cost = (
+            position['avg_cost'] * position['shares'] + cost
+        ) / total_shares
+    else:
+        new_avg_cost = price
+
+    position['shares'] = total_shares
+    position['avg_cost'] = new_avg_cost
+    portfolio_state['positions'][stock_code] = position
+
+    return {
+        'action': 'buy',
+        'stock_code': stock_code,
+        'price': round(price, 2),
+        'hands': hands,
+        'shares': shares,
+        'cost': round(cost, 2),
+        'cash_after': round(portfolio_state['cash'], 2),
+        'position': {
+            'shares': position['shares'],
+            'avg_cost': round(position['avg_cost'], 2),
+        },
+    }
+
+
+@tool
+def sell_stock(stock_code: str, hands: int):
+    '''
+    虚拟卖出股票（不连接真实券商）
+
+    参数:
+        stock_code: 股票代码，例如'600519'
+        hands: 卖出手数，1手 = 100股
+
+    返回:
+        包含成交价格、数量、剩余现金和本次盈亏的字典
+    '''
+    global portfolio_state
+
+    if hands <= 0:
+        return {'error': '卖出手数必须大于0'}
+
+    position = portfolio_state['positions'].get(stock_code)
+    if not position or position['shares'] <= 0:
+        return {'error': f'当前没有持有股票 {stock_code}，无法卖出'}
+
+    shares = hands * 100
+    if shares > position['shares']:
+        return {
+            'error': '卖出数量超过当前持仓',
+            'holding_shares': position['shares'],
+            'requested_shares': shares,
+        }
+
+    price = _get_latest_price(stock_code)
+    if price is None:
+        return {'error': f'无法获取股票 {stock_code} 的最新价格'}
+
+    proceeds = price * shares
+    portfolio_state['cash'] += proceeds
+
+    # 计算本次实现盈亏
+    avg_cost = position['avg_cost']
+    realized_profit = (price - avg_cost) * shares
+
+    # 更新持仓数量
+    position['shares'] -= shares
+    if position['shares'] == 0:
+        portfolio_state['positions'].pop(stock_code, None)
+    else:
+        portfolio_state['positions'][stock_code] = position
+
+    return {
+        'action': 'sell',
+        'stock_code': stock_code,
+        'price': round(price, 2),
+        'hands': hands,
+        'shares': shares,
+        'proceeds': round(proceeds, 2),
+        'cash_after': round(portfolio_state['cash'], 2),
+        'realized_profit': round(realized_profit, 2),
+        'remaining_shares': position['shares'],
+    }
+
+
+@tool
+def get_portfolio():
+    '''
+    获取当前虚拟账户持仓和现金情况
+
+    返回:
+        包含现金、持仓列表和估算总资产的字典
+    '''
+    global portfolio_state
+
+    result = {
+        'cash': round(portfolio_state['cash'], 2),
+        'positions': [],
+    }
+
+    # 尝试获取行情估算市值
+    try:
+        realtime_df = ak.stock_zh_a_spot_em()
+    except Exception:
+        realtime_df = None
+
+    total_assets = portfolio_state['cash']
+
+    for code, pos in portfolio_state['positions'].items():
+        market_price = None
+        market_value = None
+
+        if realtime_df is not None:
+            row = realtime_df[realtime_df['代码'] == code]
+            if len(row) > 0:
+                price = row.iloc[0]['最新价']
+                if not pd.isna(price) and price != 0:
+                    market_price = float(price)
+                    market_value = market_price * pos['shares']
+                    total_assets += market_value
+
+        result['positions'].append(
+            {
+                'stock_code': code,
+                'shares': pos['shares'],
+                'avg_cost': round(pos['avg_cost'], 2),
+                'market_price': round(market_price, 2)
+                if market_price is not None
+                else None,
+                'market_value': round(market_value, 2)
+                if market_value is not None
+                else None,
+            }
+        )
+
+    result['total_assets_estimated'] = round(total_assets, 2)
+    return result
+
+
+stock_tools = [
+    get_stock_code_by_name,
+    get_valid_stock_data,
+    analyze_stock_trend_detailed,
+    buy_stock,
+    sell_stock,
+    get_portfolio,
+]
 
 # 使用示例
 if __name__ == "__main__":

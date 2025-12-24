@@ -228,13 +228,25 @@ with gr.Blocks(title="股票分析AI助手") as demo:
     **初始资金:** 30万元 | **交易单位:** 1手(100股)
     """)
 
-    # 自定义样式：历史信息栏最小宽度
-    gr.Markdown("""
+    # 自定义样式：历史信息栏最小宽度 + 回车发送
+    gr.HTML("""
     <style>
     #chat_history {
         min-width: 480px;
     }
     </style>
+    <script>
+    window.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            const active = document.activeElement;
+            if (active && active.id === 'msg_input') {
+                e.preventDefault();
+                const btn = document.getElementById('send_btn');
+                if (btn) { btn.click(); }
+            }
+        }
+    });
+    </script>
     """)
     
     with gr.Row():
@@ -255,9 +267,10 @@ with gr.Blocks(title="股票分析AI助手") as demo:
                     placeholder="请输入您的问题，例如：帮我分析一下贵州茅台（按回车发送）",
                     lines=2,
                     scale=4,
-                    show_label=False
+                    show_label=False,
+                    elem_id="msg_input"
                 )
-                send_btn = gr.Button("发送 📤", variant="primary", scale=1)
+                send_btn = gr.Button("发送 📤", variant="primary", scale=1, elem_id="send_btn")
             
             with gr.Row():
                 clear_btn = gr.Button("清空对话 🗑️", variant="secondary")
