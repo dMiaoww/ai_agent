@@ -6,40 +6,13 @@ import gradio as gr
 from stock.agent_config import agent
 from stock.stock_tools import Context
 import json
-from datetime import datetime
 
 
 config = {"configurable": {"thread_id": "1"}, "recursion_limit": 50}
 context = Context(user_id="1")
 
 
-def format_tool_call(tool_name, tool_input):
-    """格式化工具调用信息"""
-    return f"""
-    <div style="background-color: #f0f8ff; padding: 8px; margin: 3px 0; border-radius: 5px; border-left: 4px solid #4CAF50;">
-        <strong>🔧 调用工具:</strong> <code>{tool_name}</code>
-    </div>
-    """
-
-
-def format_tool_result(tool_name, success=True):
-    """格式化工具返回结果"""
-    if success:
-        status_icon = "✅"
-        status_text = "成功"
-        bg_color = "#f0fff0"
-        border_color = "#4CAF50"
-    else:
-        status_icon = "❌"
-        status_text = "失败"
-        bg_color = "#fff5f5"
-        border_color = "#f44336"
-    
-    return f"""
-    <div style="background-color: {bg_color}; padding: 8px; margin: 3px 0; border-radius: 5px; border-left: 4px solid {border_color};">
-        <strong>{status_icon} 工具返回:</strong> <code>{tool_name}</code> - {status_text}
-    </div>
-    """
+# Removed unused helper functions for formatting tool calls/results to simplify the file
 
 
 def chat_with_agent(message, history, tool_log):
@@ -207,11 +180,6 @@ def chat_with_agent(message, history, tool_log):
     return history, current_response, ""
 
 
-def clear_conversation():
-    """清空对话"""
-    return [], "", ""
-
-
 # 创建Gradio界面
 with gr.Blocks(title="股票分析AI助手") as demo:
     gr.Markdown("""
@@ -224,8 +192,6 @@ with gr.Blocks(title="股票分析AI助手") as demo:
     - ✅ 实时技术指标分析
     - ✅ 智能交易建议
     - ✅ 工具调用实时显示
-    
-    **初始资金:** 30万元 | **交易单位:** 1手(100股)
     """)
 
     # 自定义样式：历史信息栏最小宽度 + 回车发送
@@ -246,6 +212,17 @@ with gr.Blocks(title="股票分析AI助手") as demo:
             }
         }
     });
+    // 点击发送或清空时，使用前端直接清空输入框，避免把 msg_input 作为 Gradio output 导致加载动画显示
+    window.addEventListener('load', function() {
+        const sendBtn = document.getElementById('send_btn');
+        const input = document.getElementById('msg_input');
+        if (sendBtn && input) {
+            sendBtn.addEventListener('click', function() {
+                // 清空输入框（同步前端），Gradio 的 handler 仍会更新历史
+                input.value = '';
+            });
+        }
+    });
     </script>
     """)
     
@@ -264,16 +241,13 @@ with gr.Blocks(title="股票分析AI助手") as demo:
             with gr.Row():
                 msg_input = gr.Textbox(
                     label="输入消息",
-                    placeholder="请输入您的问题，例如：帮我分析一下贵州茅台（按回车发送）",
-                    lines=2,
+                    placeholder="请输入您的问题，例如：帮我分析一下贵州茅台的趋势",
+                    lines=1,
                     scale=4,
                     show_label=False,
                     elem_id="msg_input"
                 )
                 send_btn = gr.Button("发送 📤", variant="primary", scale=1, elem_id="send_btn")
-            
-            with gr.Row():
-                clear_btn = gr.Button("清空对话 🗑️", variant="secondary")
                 
             gr.Markdown("""
             ### 💡 使用示例
@@ -288,41 +262,23 @@ with gr.Blocks(title="股票分析AI助手") as demo:
     tool_log = gr.State("")
     last_user_msg = gr.State("")  # 记录上一次用户消息，避免重复显示
     
-    # 事件绑定 - 回车键发送
     def handle_submit(user_msg, history, tool_log_state, last_msg):
-        """处理用户提交，避免重复显示上一次回复"""
+        """处理用户提交，避免重复显示上一次回复
+
+        注意：不再返回 msg_input（由前端 JS 清空），因此返回/ yield 的输出数量为 4 项：
+        (chat_history, current_response, tool_log, last_user_msg)
+        """
         # 如果是同一条消息，不重复处理
         if user_msg == last_msg:
             return history, "", tool_log_state, user_msg
-        
-        # 调用聊天函数
+
+        # 调用聊天函数（流式）并 yield 出 4 项，供 Gradio 更新聊天历史等组件
         for h, resp, tl in chat_with_agent(user_msg, history, tool_log_state):
             yield h, resp, tl, user_msg
-    
-    send_event = msg_input.submit(
-        handle_submit,
-        inputs=[msg_input, chatbot, tool_log, last_user_msg],
-        outputs=[chatbot, current_response, tool_log, last_user_msg]
-    )
-    
-    send_event.then(
-        lambda: "",
-        outputs=[msg_input]
-    )
     
     send_btn_event = send_btn.click(
         handle_submit,
         inputs=[msg_input, chatbot, tool_log, last_user_msg],
-        outputs=[chatbot, current_response, tool_log, last_user_msg]
-    )
-    
-    send_btn_event.then(
-        lambda: "",
-        outputs=[msg_input]
-    )
-    
-    clear_btn.click(
-        lambda: ([], "", "", ""),
         outputs=[chatbot, current_response, tool_log, last_user_msg]
     )
     

@@ -24,6 +24,8 @@ def get_stock_code_by_name(stock_name: str):
     返回:
         包含股票代码、名称等信息的字典
     """
+
+    print(f"查询股票名称: {stock_name}", flush=True)
     try:
         # 获取所有A股实时数据
         realtime_df = ak.stock_zh_a_spot_em()
@@ -112,6 +114,7 @@ def analyze_stock_trend_detailed(stock_identifier: str, period="30d"):
     返回:
         包含趋势分析、技术指标、支撑阻力位等详细信息的字典
     """
+    print(f"分析股票趋势: {stock_identifier}, 周期: {period}", flush=True)
     period_map = {
         "7d": 7,
         "30d": 30,
@@ -320,7 +323,7 @@ def analyze_stock_trend_detailed(stock_identifier: str, period="30d"):
 # ====== 虚拟交易与持仓管理 ======
 INITIAL_CASH = 300000.0
 
-PORTFOLIO_FILE = "portfolio_state.json"
+PORTFOLIO_FILE = "data/portfolio_state.json"
 
 # 全局虚拟账户状态（单用户场景）
 
