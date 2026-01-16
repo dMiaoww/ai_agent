@@ -41,6 +41,7 @@ SYSTEM_PROMPT = """
 
 
 from langchain.chat_models import init_chat_model
+from langgraph.checkpoint.memory import MemorySaver
 
 model = init_chat_model(
     "deepseek-chat",
@@ -48,6 +49,9 @@ model = init_chat_model(
     # timeout=10,
     streaming=True
 )
+
+# 创建 checkpointer 用于保存对话历史
+checkpointer = MemorySaver()
 
 from dataclasses import dataclass
 
@@ -70,5 +74,6 @@ agent = create_agent(
     model=model,
     system_prompt=SYSTEM_PROMPT,
     tools=stock_tools,
+    checkpointer=checkpointer,
     response_format=ToolStrategy(ResponseFormat)
 )
